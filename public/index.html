@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<title>⚔️ Classifier Arena – Coop Challenge</title>
+<script src="/socket.io/socket.io.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+body {
+  font-family: "Poppins", sans-serif;
+  background: #f5f7fa;
+  margin: 0;
+  color: #333;
+}
+header {
+  background: #004aad;
+  color: white;
+  padding: 1em;
+  font-size: 1.4em;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+section {
+  margin: 2em auto;
+  max-width: 900px;
+  background: white;
+  border-radius: 12px;
+  padding: 2em;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+button {
+  background: #0078ff;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 0.8em 1.4em;
+  margin: 0.4em;
+  font-size: 1em;
+  cursor: pointer;
+  transition: 0.2s;
+}
+button:hover { background: #005fcc; }
+button:disabled { background: #aaa; cursor: not-allowed; }
+.feature-btn {
+  background: #e0e0e0;
+  color: #333;
+  border: 1px solid #ccc;
+}
+.feature-btn.active {
+  background: #0078ff;
+  color: white;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1em;
+}
+th, td {
+  padding: 0.6em;
+  border-bottom: 1px solid #ddd;
+  text-align: center;
+}
+#metrics {
+  font-weight: bold;
+  margin-top: 1em;
+  font-size: 1.1em;
+}
+.case-box {
+  background: #f0f4ff;
+  border-radius: 8px;
+  padding: 1em;
+  margin-bottom: 1em;
+}
+</style>
+</head>
+<body>
+
+<header>⚔️ Classifier Arena – Coop Challenge</header>
+
+<section id="login">
+  <h2>Benvenuto nella sfida!</h2>
+  <p>Inserisci il tuo nome per partecipare:</p>
+  <input id="username" placeholder="Il tuo nome">
+  <br><br>
+  <button onclick="join()">🚀 Entra in gioco</button>
+</section>
+
+<section id="setup" style="display:none;">
+  <h2>1️⃣ Costruisci il tuo modello</h2>
+  <p>Scegli le caratteristiche che userà l'IA per decidere chi accettare:</p>
+  <div id="featureButtons"></div>
+
+  <p>Seleziona algoritmo e soglia di decisione:</p>
+  <select id="modelType">
+    <option value="logreg">Logistic Regression</option>
+    <option value="tree">Decision Tree</option>
+    <option value="svm">SVM</option>
+  </select>
+  <br><br>
+  <label>Soglia decisionale:
+    <input type="range" id="threshold" min="0" max="1" step="0.05" value="0.5">
+    <span id="thrVal">0.5</span>
+  </label>
+  <br><br>
+  <button onclick="train()">⚙️ Addestra modello</button>
+
+  <div id="metrics"></div>
+</section>
+
+<section id="battle" style="display:none;">
+  <h2>2️⃣ Sfida il tuo modello</h2>
+  <div id="case" class="case-box"></div>
+  <button onclick="predict(1)">✅ Accetta</button>
+  <button onclick="predict(0)">❌ Rifiuta</button>
+</section>
+
+<section id="ranking" style="display:none;">
+  <h2>🏆 Classifica in tempo reale</h2>
+  <table>
+    <thead><tr><th>Giocatore</th><th>Accuracy</th><th>Fairness</th><th>Punteggio</th></tr></thead>
+    <tbody id="leader"></tbody>
+  </table>
+</section>
+
+<script>
+const socket = io();
+let features=["eta","genere","esperienza","zona","titolo"];
+let currentCase=null;
+
+function join(){
+  const name=document.getElementById("username").value.trim();
+  if(!name){alert("Inserisci un nome!");return;}
+  socket.emit("joinGame",name);
+  document.getElementById("login").style.display="none";
+  document.getElementById("setup").style.display="block";
+  renderFeatures();
+}
+
+function renderFeatures(){
+  const all=["eta","genere","esperienza","zona","titolo"];
+  const container=document.getElementById("featureButtons");
+  container.innerHTML="";
+  all.forEach(f=>{
+    const btn=document.createElement("button");
+    btn.textContent=f;
+    btn.className="feature-btn"+(features.includes(f)?" active":"");
+    btn.onclick=()=>{
+      if(features.includes(f)) features=features.filter(x=>x!==f);
+      else features.push(f);
+      renderFeatures();
+    };
+    container.appendChild(btn);
+  });
+}
+
+document.getElementById("threshold").addEventListener("input",e=>{
+  document.getElementById("thrVal").textContent=e.target.value;
+});
+
+function train(){
+  const model_type=document.getElementById("modelType").value;
+  const threshold=document.getElementById("threshold").value;
+  socket.emit("trainModel",{features,model_type,threshold});
+}
+
+socket.on("modelReady",(res)=>{
+  document.getElementById("metrics").innerHTML=
+    `🎯 Accuratezza: ${(res.accuracy*100).toFixed(1)}% | ⚖️ Fairness gap: ${(res.fairness_gap*100).toFixed(1)}% | ⭐ Punteggio etico: ${res.ethical_score}`;
+  document.getElementById("setup").style.display="none";
+  document.getElementById("battle").style.display="block";
+  document.getElementById("ranking").style.display="block";
+  socket.emit("requestCase");
+});
+
+socket.on("newCase",(c)=>{
+  currentCase=c;
+  document.getElementById("case").innerHTML=
+    `<b>Età:</b> ${c.eta} &nbsp; | &nbsp; <b>Genere:</b> ${c.genere} &nbsp; | &nbsp; <b>Esperienza:</b> ${c.esperienza} anni <br>`+
+    `<b>Zona:</b> ${c.zona} &nbsp; | &nbsp; <b>Titolo:</b> ${c.titolo}`;
+});
+
+function predict(p){
+  socket.emit("predictCase",{pred:p});
+  socket.emit("requestCase");
+}
+
+socket.on("leaderboard",(users)=>{
+  const tbody=document.getElementById("leader");
+  tbody.innerHTML="";
+  users.sort((a,b)=>b.score-a.score).forEach(u=>{
+    const tr=document.createElement("tr");
+    tr.innerHTML=`<td>${u.name}</td><td>${(u.acc*100||0).toFixed(1)}%</td><td>${(1-(u.fairness_gap||0))*100|0}%</td><td>${u.score}</td>`;
+    tbody.appendChild(tr);
+  });
+});
+</script>
+</body>
+</html>
