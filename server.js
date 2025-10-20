@@ -1,19 +1,47 @@
+// ---- IMPORTS ----
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
 import { spawn } from "child_process";
 import fs from "fs";
 
+// ---- EXPRESS + SOCKET.IO SETUP ----
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
-app.use(express.static("public"));
+const PORT = process.env.PORT || 10000;
 
-const PORT = process.env.PORT || 3000;
+app.use(express.static("public"));
 const users = {};
 let currentCase = null;
 
-// scegli un caso casuale dal dataset
+// ---- FUNZIONE DI ESECUZIONE PYTHON ----
+function runPython(args, callback) {
+  const py = spawn("python3", ["model_eval.py", JSON.stringify(args)]);
+  let output = "";
+  let errorOutput = "";
+
+  py.stdout.on("data", (d) => (output += d.toString()));
+  py.stderr.on("data", (d) => (errorOutput += d.toString()));
+
+  py.on("close", (code) => {
+    if (errorOutput) console.error("🐍 Errore Python:", errorOutput);
+    if (!output.trim()) {
+      console.error("⚠️ Nessun output Python ricevuto.");
+      callback(null);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(output);
+      callback(parsed);
+    } catch (err) {
+      console.error("⚠️ Errore nel parsing JSON:", err.message, output);
+      callback(null);
+    }
+  });
+}
+
+// ---- SELEZIONA UN CASO DAL DATASET ----
 function pickCase() {
   const rows = fs.readFileSync("dataset.csv", "utf8").split("\n").slice(1, -1);
   const rand = rows[Math.floor(Math.random() * rows.length)].split(",");
@@ -27,6 +55,7 @@ function pickCase() {
   };
 }
 
+// ---- SOCKET.IO LOGICA DI GIOCO ----
 io.on("connection", (socket) => {
   console.log(`🟢 ${socket.id} connesso`);
 
@@ -36,19 +65,12 @@ io.on("connection", (socket) => {
   });
 
   socket.on("trainModel", (data) => {
-    const args = JSON.stringify(data);
-    const py = spawn("python", ["model_eval.py", args]);
-    let output = "";
-    py.stdout.on("data", (d) => (output += d.toString()));
-    py.on("close", () => {
-      try {
-        const res = JSON.parse(output);
-        users[socket.id] = { ...users[socket.id], ...res };
-        socket.emit("modelReady", res);
-        io.emit("leaderboard", Object.values(users));
-      } catch (err) {
-        console.error("Errore Python:", err, output);
+    runPython(data, (res) => {
+      if (!res) {
+        socket.emit("modelError", { message: "Errore nell'elaborazione del modello." });
+        return;
       }
+      socket.emit("modelReady", res);
     });
   });
 
@@ -70,4 +92,5 @@ io.on("connection", (socket) => {
   });
 });
 
+// ---- AVVIO SERVER ----
 server.listen(PORT, () => console.log(`✅ Server attivo su porta ${PORT}`));
