@@ -3,7 +3,8 @@
   "name": "classifier-arena",
   "version": "1.0.0",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "postinstall": "pip3 install -r requirements.txt"
   },
   "dependencies": {
     "express": "^4.19.2",
